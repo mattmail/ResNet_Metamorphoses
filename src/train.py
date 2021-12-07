@@ -1,3 +1,5 @@
+import matplotlib.pyplot as plt
+
 from utils import get_vnorm, get_znorm, plot_results, save_losses
 from tqdm import tqdm
 import time
@@ -5,7 +7,9 @@ import torch
 import os
 import random
 
-def train_opt(model, source, target, optimizer, device, n_iter=1000, local_reg=False, debug=False, plot_iter=500, L2_weight=.5, v_weight=3e-6, z_weight=3e-6):
+def train_opt(model, source, target, optimizer, device, n_iter=1000, local_reg=False, double_resnets=False, debug=False, plot_iter=500, L2_weight=.5, v_weight=3e-6, z_weight=3e-6):
+    Laplacian = torch.tensor([[0.25,.5,0.25],[0.5,-3.,0.5],[0.25,0.5,0.25]]).unsqueeze(0).unsqueeze(0).to(device)
+    Laplacian = torch.cat([Laplacian, Laplacian], dim=1)
     l = model.l
     mu = model.mu
     if local_reg:
@@ -17,12 +21,19 @@ def train_opt(model, source, target, optimizer, device, n_iter=1000, local_reg=F
         if i == 5 and debug:
             break
         if local_reg:
-            source_deformed, fields, residuals, grad = model(source_img, source_seg)
+            if double_resnets:
+                source_deformed, fields, residuals, grad = model(source_img, source_seg)
+            else:
+                source_deformed, fields, residuals, grad = model(source_img, source_seg)
         else:
             source_deformed, fields, residuals, grad = model(source_img)
-        v_norm = get_vnorm(residuals, fields, grad)
+        if not double_resnets:
+            v_norm = get_vnorm(residuals, fields, grad)
+        else:
+            #v_norm =  sum([ ((-0.01*torch.nn.functional.conv2d(field.permute(0,3,1,2), Laplacian, padding=1) + field.permute(0,3,1,2) ) ** 2).sum() for field in fields])
+            v_norm = sum([(field ** 2).sum() for field in fields])
         residuals_norm = get_znorm(residuals)
-        L2_norm = ((source_deformed[l] - target) ** 2).sum()
+        L2_norm = ((source_deformed - target) ** 2).sum()
         total_loss = L2_weight * L2_norm + v_weight * (v_norm) + mu * z_weight * residuals_norm
         print("Iteration %d: Total loss: %f   L2 norm: %f   V_reg: %f   Z_reg: %f" % (i, total_loss, L2_norm, v_norm, residuals_norm))
         optimizer.zero_grad()
@@ -30,12 +41,13 @@ def train_opt(model, source, target, optimizer, device, n_iter=1000, local_reg=F
         optimizer.step()
         if i == 500:
             for g in optimizer.param_groups:
-                g['lr'] = 5e-4
+                g['lr'] = 1e-3
         if i == 1000:
             for g in optimizer.param_groups:
-                g['lr'] = 1e-4
+                g['lr'] = 5e-4
         if (i + 1) % plot_iter == 0:
             plot_results(source_img, target, source_deformed, fields, residuals, model.l, model.mu, i)
+
 
     plot_results(source_img, target, source_deformed, fields, residuals, model.l, model.mu, n_iter)
 
@@ -130,5 +142,9 @@ def eval(model, test_list, target, local_reg, e, plot_iter, result_path, device,
 
         print("Validation L2 loss: %f" %(L2_norm_mean /test_list.shape[0]))
         L2_val.append(L2_norm_mean / test_list.shape[0])
+        fig, ax = plt.subplots()
+        im = ax.imshow(model.z0.squeeze().detach().cpu())
+        cbar = ax.figure.colorbar(im, ax=ax)
+        plt.show()
     return (L2_val)
 

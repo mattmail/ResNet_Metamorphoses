@@ -50,11 +50,11 @@ def plot_results(source, target, source_deformed, fields, residuals, l, mu, i, m
     ax[0, 1].imshow(target.squeeze().detach().cpu(), cmap='gray', vmin=0, vmax=1)
     ax[0, 1].set_title("Target")
     ax[0, 1].axis('off')
-    ax[1, 0].imshow((source_deformed[l]).squeeze().detach().cpu(), cmap='gray', vmin=0, vmax=1)
+    ax[1, 0].imshow((source_deformed).squeeze().detach().cpu(), cmap='gray', vmin=0, vmax=1)
     ax[1, 0].set_title("Deformed")
     ax[1, 0].axis('off')
     superposition = torch.stack([target.squeeze().detach().cpu(),
-                                 source_deformed[l].squeeze().detach().cpu(),
+                                 source_deformed.squeeze().detach().cpu(),
                                  torch.zeros(source.squeeze().shape)], dim=2)
     ax[1, 1].imshow(superposition, vmin=0, vmax=1)
     ax[1, 1].set_title("Superposition")
@@ -73,12 +73,17 @@ def plot_results(source, target, source_deformed, fields, residuals, l, mu, i, m
     ax[1, 2].set_title("Residuals heatmap")
     ax[1, 2].axis('off')
     ax[0, 2].set_title('Shape deformation only')
-    deformations = [source]
+    deformation = id_grid.permute(0,3,1,2)
     for j in range(l):
-        deformations.append(deform_image(deformations[j], id_grid - fields[j] / l))
+        deformation = deform_image(deformation, id_grid - fields[j]/ l)
+    deformation_only = deform_image(source, deformation.permute(0,2,3,1))
+    """deformation = id_grid - sum(fields) / l
+    deformation_only = deform_image(source, deformation)"""
 
-    ax[0, 2].imshow(deformations[l].detach().cpu().squeeze(), cmap="gray", vmin=0, vmax=1)
+
+    ax[0, 2].imshow(deformation_only.detach().cpu().squeeze(), cmap="gray", vmin=0, vmax=1)
     ax[0, 2].axis('off')
+
     if mode == "learning":
         fig.suptitle('Metamorphoses, epoch: %d' % (i + 1))
     else:
@@ -86,6 +91,19 @@ def plot_results(source, target, source_deformed, fields, residuals, l, mu, i, m
 
     plt.axis('off')
     plt.show()
+    plt.figure()
+    is_diffeo = check_diffeo(deformation)
+    if is_diffeo.sum() > 0:
+        visual = torch.cat([deformation_only, deformation_only, deformation_only], dim=1).squeeze()
+        is_diffeo = is_diffeo.squeeze()
+        visual[0, is_diffeo] = 1.
+        visual[1:3, is_diffeo] = 0.
+        plt.imshow(visual.detach().cpu().permute(1, 2, 0))
+        plt.title('Non-diffeomorphic points')
+        plt.show()
+        print("Deformation is not diffeomorphic: %d folds" % (is_diffeo.sum()))
+    else:
+        print("Deformation is diffeomorphic: %d folds" % (is_diffeo.sum()))
 
 def save_losses(L2_loss, L2_val, e, result_path):
     plt.figure()
@@ -98,3 +116,8 @@ def save_losses(L2_loss, L2_val, e, result_path):
     plt.legend()
     plt.savefig(result_path + '/loss.png')
     plt.clf()
+
+def check_diffeo(field):
+    Jac = K.filters.SpatialGradient()(field)
+    det = Jac[:, 0, 0, :, :] * Jac[:, 1, 1, :, :] - Jac[:, 1, 0, :, :] * Jac[:, 0, 1, :, :]
+    return det <= 0

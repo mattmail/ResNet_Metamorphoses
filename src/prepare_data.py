@@ -5,12 +5,15 @@ import os
 import cv2
 import random
 
-def load_brats_2021(device, use_segmentation):
+def load_brats_2021(device, use_segmentation,chose_randomly=False):
     test_list = []
-    with open("test_list.txt", "r") as f:
-        test_paths = f.readlines()
-        test_paths = [path[:-1] for path in test_paths]
-        f.close()
+    if not chose_randomly:
+        with open("test_list.txt", "r") as f:
+            test_paths = f.readlines()
+            test_paths = [path[:-1] for path in test_paths]
+            f.close()
+    else:
+        test_paths = []
     source_list = []
     for image in os.listdir('../data_miccai_2D_2021/'):
         if image[:5] == "BraTS" and image not in test_paths:
@@ -27,21 +30,25 @@ def load_brats_2021(device, use_segmentation):
                     source_list.append(torch.from_numpy(
                         np.transpose(np.load('../data_miccai_2D_2021/' + image + "/" + image + "_t1.npy"))).type(
                         torch.FloatTensor).unsqueeze(0))
+            else:
+                if use_segmentation:
+                    test_seg = np.transpose(np.load("../data_miccai_2D_2021/" + image + "/" + image + "_seg.npy"))
+                    test_seg[test_seg == 2.] = 1.
+                    test_seg[test_seg == 4.] = 1.
+                    test_seg = torch.from_numpy(test_seg).type(torch.FloatTensor).unsqueeze(0).unsqueeze(0)
+                    test_list.append(torch.cat([torch.from_numpy(
+                        np.transpose(np.load('../data_miccai_2D_2021/' + image + "/" + image + "_t1.npy"))).type(
+                        torch.FloatTensor).unsqueeze(0).unsqueeze(0), test_seg]))
+                else:
+                    test_list.append(torch.from_numpy(
+                        np.transpose(np.load('../data_miccai_2D_2021/' + image + "/" + image + "_t1.npy"))).type(
+                        torch.FloatTensor).unsqueeze(0))
 
+    if chose_randomly:
+        random.shuffle(source_list)
+        test_list = source_list[-40:]
+        source_list = source_list[:-40]
     print("Number of training images:", len(source_list))
-    for image in test_paths:
-        if use_segmentation:
-            test_seg = np.transpose(np.load("../data_miccai_2D_2021/" + image + "/" + image + "_seg.npy"))
-            test_seg[test_seg == 2.] = 1.
-            test_seg[test_seg == 4.] = 1.
-            test_seg = torch.from_numpy(test_seg).type(torch.FloatTensor).unsqueeze(0).unsqueeze(0)
-            test_list.append(torch.cat([torch.from_numpy(
-                np.transpose(np.load('../data_miccai_2D_2021/' + image + "/" + image + "_t1.npy"))).type(
-                torch.FloatTensor).unsqueeze(0).unsqueeze(0), test_seg]))
-        else:
-            test_list.append(torch.from_numpy(
-                np.transpose(np.load('../data_miccai_2D_2021/' + image + "/" + image + "_t1.npy"))).type(
-                torch.FloatTensor).unsqueeze(0))
     print("Number of test images:", len(test_list))
 
     MNI_img = nib.load("/usr/local/fsl/data/linearMNI/MNI152lin_T1_1mm_brain.nii.gz").get_fdata()
